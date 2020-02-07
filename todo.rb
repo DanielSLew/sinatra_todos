@@ -177,7 +177,7 @@ post "/lists/:list_id/todos/:todo_id/destroy" do
   @list = session[:lists][@list_id]
 
   todo_id = params[:todo_id].to_i
-  todo_name = list[:todos][todo_id][:name]
+  todo_name = @list[:todos][todo_id][:name]
   @list[:todos].delete_at(todo_id)
   session[:success] = "The '#{todo_name}' todo has been deleted."
   redirect "/lists/#{@list_id}"
