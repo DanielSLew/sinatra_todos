@@ -4,16 +4,12 @@ require "sinatra/content_for"
 require "tilt/erubis"
 
 configure do
+  set :erb, :escape_html => true
   enable :sessions
   set :session_secret, 'secret'
 end
 
 helpers do
-
-  # Check the state of a todo, returns a boolean
-  def todo_complete?(index, list)
-    list[:todos][index][:completed]
-  end
 
   # Check if list is completed, returns a boolean
   def list_complete?(list)
@@ -38,42 +34,22 @@ helpers do
   def sort_lists(lists, &block)
     complete_lists, incomplete_lists = lists.partition { |list| list_complete?(list)}
     
-    incomplete_lists.each { |list| yield list, lists.index(list) }
-    complete_lists.each { |list| yield list, lists.index(list) }
+    incomplete_lists.each(&block)
+    complete_lists.each(&block)
   end
 
   # Sort the todos from completed to not completed
   def sort_todos(todos, &block)
     complete_todos, incomplete_todos = todos.partition { |todo| todo[:completed]}
     
-    incomplete_todos.each { |todo| yield todo, todos.index(todo) }
-    complete_todos.each { |todo| yield todo, todos.index(todo) }
+    incomplete_todos.each(&block)
+    complete_todos.each(&block)
   end
 
 end
 
 before do
   session[:lists] ||= []
-end
-
-get "/" do
-  redirect "/lists"
-end
-
-# GET /lists          -> view all lists
-# GET /lists/new      -> new list form
-# POST /lists         -> create new list
-# GET /lists/1        -> view a single list
-
-# View list of lists
-get "/lists" do
-  @lists = session[:lists]
-  erb :lists, layout: :layout
-end
-
-# Render the new list form
-get "/lists/new" do
-  erb :new_list, layout: :layout
 end
 
 # Return an error message if the name is invalid. Return nil if name is valid
@@ -92,9 +68,33 @@ def error_for_todo(name)
   end
 end
 
-# Turn a string representation of a boolean to a boolean
-def true?(obj)
-  obj.to_s.downcase == "true"
+def load_list(index)
+  list = session[:lists].find { |list| list[:id] == index }
+  return list if list
+
+  session[:error] = "The specified list was not found."
+  redirect "/lists"
+end
+
+
+def next_element_id(elements)
+  max = elements.map { |element| element[:id] }.max || 0
+  max + 1
+end
+
+get "/" do
+  redirect "/lists"
+end
+
+# View list of lists
+get "/lists" do
+  @lists = session[:lists]
+  erb :lists, layout: :layout
+end
+
+# Render the new list form
+get "/lists/new" do
+  erb :new_list, layout: :layout
 end
 
 # Create a new list
@@ -106,7 +106,8 @@ post "/lists" do
     session[:error] = error
     erb :new_list, layout: :layout
   else
-    session[:lists] << { name: list_name, todos: [] }
+    id = next_element_id(session[:lists])
+    session[:lists] << { id: id, name: list_name, todos: [] }
     session[:success] = "The list has been created."
     redirect "/lists"
   end
@@ -114,9 +115,12 @@ end
 
 # View a single todo list
 get "/lists/:id" do
-  @list_id = params[:id].to_i
+  id = params[:id].to_i
+  @list = load_list(id)
+  @list_name = @list[:name]
+  @list_id = @list[:id]
+  @todos = @list[:todos]
 
-  @list = session[:lists][@list_id]
   erb :list, layout: :layout
 end
 
@@ -124,7 +128,7 @@ end
 get "/lists/:id/edit" do
   id = params[:id].to_i
 
-  @list = session[:lists][id]
+  @list = load_list(id)
   erb :edit_list, layout: :layout
 end
 
@@ -132,7 +136,7 @@ end
 post "/lists/:id" do
   list_name = params[:list_name].strip
   id = params[:id].to_i
-  @list = session[:lists][id]
+  @list = load_list(id)
 
   error = error_for_list_name(list_name)
   if error
@@ -148,16 +152,19 @@ end
 # Delete a todo list
 post "/lists/:id/destroy" do
   id = params[:id].to_i
-  list_name = session[:lists][id][:name]
-  session[:lists].delete_at(id)
-  session[:success] = "The '#{list_name}' list has been deleted."
-  redirect "/lists"
+  session[:lists].reject! { |list| list[:id] == id }
+  session[:success] = "The list has been deleted."
+  if env["HTTP_X_REQUESTED_WITH"] == "XMLHttpRequest"
+    "/lists"
+  else
+    redirect "/lists"
+  end
 end
 
 # Add a new todo to a list
 post "/lists/:list_id/todos" do
   @list_id = params[:list_id].to_i
-  @list = session[:lists][@list_id]
+  @list = load_list(@list_id)
   text = params[:todo].strip
 
   error = error_for_todo(text)
@@ -165,31 +172,39 @@ post "/lists/:list_id/todos" do
     session[:error] = error
     erb :list, layout: :layout
   else
-    @list[:todos] << { name: params[:todo], completed: false }
+    id = next_element_id(@list[:todos])
+    @list[:todos] << { id: id, name: params[:todo], completed: false }
     session[:success] = "The todo was added."
     redirect "/lists/#{@list_id}"
   end
 end
 
 # Delete a todo from a list
-post "/lists/:list_id/todos/:todo_id/destroy" do
+post "/lists/:list_id/todos/:id/destroy" do
   @list_id = params[:list_id].to_i
-  @list = session[:lists][@list_id]
+  @list = load_list(@list_id)
 
-  todo_id = params[:todo_id].to_i
-  todo_name = @list[:todos][todo_id][:name]
-  @list[:todos].delete_at(todo_id)
-  session[:success] = "The '#{todo_name}' todo has been deleted."
-  redirect "/lists/#{@list_id}"
+  todo_id = params[:id].to_i
+  @list[:todos].reject! { |todo| todo[:id] == todo_id }
+
+  if env["HTTP_X_REQUESTED_WITH"] == "XMLHttpRequest"
+    status 204
+  else
+    session[:success] = "The todo has been deleted."
+    redirect "/lists/#{@list_id}"
+  end
 end
 
 # Update the status of a todo
 post "/lists/:list_id/todos/:todo_id" do
   @list_id = params[:list_id].to_i
-  @list = session[:lists][@list_id]
+  @list = load_list(@list_id)
 
   todo_id = params[:todo_id].to_i
-  @list[:todos][todo_id][:completed] = true?(params[:completed])
+  is_completed = params[:completed] == "true"
+  todo = @list[:todos].find { |todo| todo[:id] == todo_id }
+  todo[:completed] = is_completed
+
   session[:success] = "The todo has been updated."
   redirect "/lists/#{@list_id}"
 end
@@ -197,7 +212,7 @@ end
 # Mark all todos as completed
 post "/lists/:list_id/complete_all" do
   @list_id = params[:list_id].to_i
-  @list = session[:lists][@list_id]
+  @list = load_list(@list_id)
 
   @list[:todos].each do |todo|
     todo[:completed] = true
@@ -207,6 +222,6 @@ post "/lists/:list_id/complete_all" do
 end
 
 
-a = {error: "error", lists: [{name: "home", todos: [name: "Work", completed: false]}, {name: "work", todos: []}]}
+# a = {error: "error", lists: [{name: "home", todos: [name: "Work", completed: false]}, {name: "work", todos: []}]}
 
 
