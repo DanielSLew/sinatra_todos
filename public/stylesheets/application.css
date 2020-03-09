@@ -28,7 +28,7 @@ body > header .actions {
   text-align: right; 
 }
 
-body > header .actions a {
+body > header .acti:ons a {
   -webkit-transition: color 200ms ease;
   -moz-transition: color 200ms ease;
   -o-transition: color 200ms ease; 
