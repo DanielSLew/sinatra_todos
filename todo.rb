@@ -20,21 +20,11 @@ helpers do
 
   # Check if list is completed, returns a boolean
   def list_complete?(list)
-    todos_count(list) > 0 && todos_left_to_complete(list) == 0
+    list[:todos_count] > 0 && list[:todos_remaining_count] == 0
   end
 
   def list_class(list)
     "complete" if list_complete?(list)
-  end
-
-  # Check the number of todos in a list
-  def todos_count(list)
-    list[:todos].size
-  end
-
-  # Number of todos left to complete
-  def todos_left_to_complete(list)
-    list[:todos].count {|todo| !todo[:completed]}
   end
 
   # Sort the lists from completed to not completed
@@ -124,7 +114,7 @@ get "/lists/:id" do
   @list = load_list(id)
   @list_name = @list[:name]
   @list_id = @list[:id]
-  @todos = @list[:todos]
+  @todos = @storage.find_todos_for_list(@list_id)
 
   erb :list, layout: :layout
 end
